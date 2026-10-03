@@ -45,6 +45,11 @@ base {
     archivesName = mod_id
 }
 
+// Put the Minecraft version in the jar name so builds for different MC versions are easy to tell apart
+tasks.named('jar') {
+    archiveVersion = "${mod_version}+${minecraft_version}"
+}
+
 // NeoForge 26.1 requires Java 25.
 java {
     toolchain {
