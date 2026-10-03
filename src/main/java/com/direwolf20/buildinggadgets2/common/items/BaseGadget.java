@@ -1,5 +1,6 @@
 package com.direwolf20.buildinggadgets2.common.items;
 
+import com.direwolf20.buildinggadgets2.setup.Config;
 import com.direwolf20.buildinggadgets2.api.gadgets.GadgetModes;
 import com.direwolf20.buildinggadgets2.api.gadgets.GadgetTarget;
 import com.direwolf20.buildinggadgets2.common.events.ServerTickHandler;
@@ -45,7 +46,14 @@ public abstract class BaseGadget extends Item {
 
     public abstract int getEnergyMax();
 
-    public abstract int getEnergyCost();
+    /**
+     * Energy cost per operation from the config, before {@link Config#isPowerRequired()} is applied.
+     */
+    protected abstract int getConfiguredEnergyCost();
+
+    public final int getEnergyCost() {
+        return Config.isPowerRequired() ? getConfiguredEnergyCost() : 0;
+    }
 
     @Override
     public int getMaxDamage(ItemStack stack) {
@@ -54,6 +62,10 @@ public abstract class BaseGadget extends Item {
 
     @Override
     public boolean isBarVisible(ItemStack stack) {
+        if (!Config.isPowerRequired()) {
+            return false;
+        }
+
         var energy = stack.getCapability(Capabilities.Energy.ITEM, null);
         if (energy == null) {
             return false;
@@ -104,7 +116,7 @@ public abstract class BaseGadget extends Item {
         }
 
         var energy = stack.getCapability(Capabilities.Energy.ITEM, null);
-        if (energy != null) {
+        if (energy != null && Config.isPowerRequired()) {
             MutableComponent energyText = !sneakPressed
                     ? Component.translatable("buildinggadgets2.tooltips.energy", MagicHelpers.tidyValue(energy.getAmountAsInt()), MagicHelpers.tidyValue(energy.getCapacityAsInt()))
                     : Component.translatable("buildinggadgets2.tooltips.energy", String.format("%,d", energy.getAmountAsInt()), String.format("%,d", energy.getCapacityAsInt()));

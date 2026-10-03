@@ -31,9 +31,12 @@ public class Config {
 
     public static ModConfigSpec.IntValue RAYTRACE_RANGE;
 
+    public static ModConfigSpec.BooleanValue REQUIRE_POWER;
+    private static ModConfigSpec SERVER_SPEC;
+
     public static void register(ModContainer container) {
-        //registerServerConfigs();
         registerCommonConfigs(container);
+        registerServerConfigs(container);
         //registerClientConfigs();
     }
 
@@ -59,7 +62,23 @@ public class Config {
     private static void registerServerConfigs(ModContainer container) {
         //GeneratorConfig.registerServerConfig(SERVER_BUILDER);
         //PowergenConfig.registerServerConfig(SERVER_BUILDER);
-        container.registerConfig(ModConfig.Type.SYNCED, SERVER_BUILDER.build());
+        SERVER_BUILDER.comment("Power settings").push(CATEGORY_POWER);
+        REQUIRE_POWER = SERVER_BUILDER.comment("Whether gadgets need Forge Energy to work. Set to false to use them without charging;",
+                        "the per-gadget costs in the common config are then ignored.")
+                .define("requirePower", true);
+        SERVER_BUILDER.pop();
+
+        // Synced so the server decides and every client agrees (energy bars, previews, cost checks)
+        SERVER_SPEC = SERVER_BUILDER.build();
+        container.registerConfig(ModConfig.Type.SYNCED, SERVER_SPEC);
+    }
+
+    /**
+     * Whether gadgets consume energy. Synced configs only load with a world, so this assumes power is
+     * required until the server's value is known.
+     */
+    public static boolean isPowerRequired() {
+        return SERVER_SPEC == null || !SERVER_SPEC.isLoaded() || REQUIRE_POWER.get();
     }
 
     private static void generalConfig() {

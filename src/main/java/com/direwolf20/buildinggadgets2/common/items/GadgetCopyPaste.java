@@ -37,7 +37,7 @@ public class GadgetCopyPaste extends BaseGadget {
     }
 
     @Override
-    public int getEnergyCost() {
+    protected int getConfiguredEnergyCost() {
         return Config.COPYPASTEGADGET_COST.get();
     }
 

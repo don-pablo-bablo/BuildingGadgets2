@@ -45,7 +45,7 @@ public class GadgetExchanger extends BaseGadget {
     }
 
     @Override
-    public int getEnergyCost() {
+    protected int getConfiguredEnergyCost() {
         return Config.EXCHANGINGGADGET_COST.get();
     }
 

@@ -48,7 +48,7 @@ public class GadgetCutPaste extends BaseGadget {
     }
 
     @Override
-    public int getEnergyCost() {
+    protected int getConfiguredEnergyCost() {
         return Config.CUTPASTEGADGET_COST.get();
     }
 

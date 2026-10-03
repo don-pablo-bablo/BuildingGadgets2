@@ -43,7 +43,7 @@ public class GadgetDestruction extends BaseGadget {
     }
 
     @Override
-    public int getEnergyCost() {
+    protected int getConfiguredEnergyCost() {
         return Config.DESTRUCTIONGADGET_COST.get();
     }
 

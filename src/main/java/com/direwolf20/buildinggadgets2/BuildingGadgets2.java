@@ -39,6 +39,7 @@ public class BuildingGadgets2 {
 
         if (FMLEnvironment.getDist().isClient()) {
             eventBus.addListener(ClientSetup::init);
+            ClientSetup.registerConfigScreen(container);
         }
     }
 

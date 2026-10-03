@@ -35,7 +35,7 @@ public class GadgetBuilding extends BaseGadget {
     }
 
     @Override
-    public int getEnergyCost() {
+    protected int getConfiguredEnergyCost() {
         return Config.BUILDINGGADGET_COST.get();
     }
 
