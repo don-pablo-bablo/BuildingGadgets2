@@ -127,10 +127,33 @@ public class VBORenderer {
     }
 
     /**
-     * Cache-miss driver. Called once per frame before {@link #drawRender} and re-bakes the preview
-     * when {@link #shouldUpdateRender(Player, ItemStack)} says we need a fresh bake.
+     * Per-frame GPU upload step: re-bakes the preview on a cache miss and periodically re-sorts it.
+     * Must run while no render pass is open (26.3 rejects buffer writes inside a pass), so it's driven from
+     * {@code SubmitCustomGeometryEvent} rather than from the render-stage events that {@link #drawRender} uses.
      */
-    public static void buildRender(Player player, ItemStack gadget) {
+    public static void prepareRender(Player player, ItemStack gadget) {
+        buildRender(player, gadget);
+        if (layerCaches.isEmpty() || statePosCache == null)
+            return;
+        PreviewTarget target = resolvePreviewTarget(player, gadget);
+        if (target == null)
+            return;
+
+        // Re-sort translucent every N frames to kill the screendoor effect as the camera moves.
+        int sortFrequency = isLargeRender ? 100 : 20;
+        if (sortCounter > sortFrequency) {
+            sortAll(target.renderPos());
+            sortCounter = 0;
+        } else {
+            sortCounter++;
+        }
+    }
+
+    /**
+     * Cache-miss driver. Re-bakes the preview when {@link #shouldUpdateRender(Player, ItemStack)} says we
+     * need a fresh bake.
+     */
+    private static void buildRender(Player player, ItemStack gadget) {
         BlockHitResult lookingAt = VectorHelper.getLookingAt(player, gadget);
         BlockPos anchorPos = GadgetNBT.getAnchorPos(gadget);
         BlockPos renderPos = anchorPos.equals(GadgetNBT.nullPos) ? lookingAt.getBlockPos() : anchorPos;
@@ -471,7 +494,7 @@ public class VBORenderer {
 
     /**
      * Per-frame draw. Issues one indexed draw per cached layer into {@code pass}, reusing the persistent
-     * {@link GpuBuffer}s populated by {@link #generateRender}. No CPU→GPU vertex re-upload.
+     * {@link GpuBuffer}s populated by {@link #prepareRender}. No GPU uploads happen here.
      * <p>
      * The caller must have the camera view rotation applied to {@link RenderSystem#getModelViewStack()}.
      */
@@ -484,15 +507,6 @@ public class VBORenderer {
             return;
         BlockPos renderPos = target.renderPos();
         Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
-
-        // Re-sort translucent every N frames to kill the screendoor effect as the camera moves.
-        int sortFrequency = isLargeRender ? 100 : 20;
-        if (sortCounter > sortFrequency) {
-            sortAll(renderPos);
-            sortCounter = 0;
-        } else {
-            sortCounter++;
-        }
 
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();

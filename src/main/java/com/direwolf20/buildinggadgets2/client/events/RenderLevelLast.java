@@ -43,10 +43,13 @@ public class RenderLevelLast {
 
         SubmitNodeCollector collector = evt.getSubmitNodeCollector();
         PoseStack poseStack = evt.getPoseStack();
-        if (heldItem.getItem() instanceof GadgetDestruction)
+        if (heldItem.getItem() instanceof GadgetDestruction) {
             DestructionRenderer.render(collector, poseStack, player, heldItem);
-        else
+        } else {
+            // No render pass is open yet at this point, so this is where the preview mesh gets uploaded/re-sorted.
+            VBORenderer.prepareRender(player, heldItem);
             VBORenderer.submitOverlays(collector, poseStack, player, heldItem);
+        }
 
         BlockPos anchorPos = GadgetNBT.getAnchorPos(heldItem);
         if (anchorPos != null && !anchorPos.equals(GadgetNBT.nullPos))
@@ -64,7 +67,6 @@ public class RenderLevelLast {
         if (heldItem.isEmpty())
             return;
 
-        VBORenderer.buildRender(player, heldItem);
         VBORenderer.drawRender(evt.getRenderPass(), player, heldItem);
     }
 
@@ -83,8 +85,6 @@ public class RenderLevelLast {
         ItemStack heldItem = getPreviewGadget(player);
         if (heldItem.isEmpty())
             return;
-
-        VBORenderer.buildRender(player, heldItem);
 
         RenderTarget mainTarget = mc.gameRenderer.mainRenderTarget();
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
