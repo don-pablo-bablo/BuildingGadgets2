@@ -54,6 +54,9 @@ public class BG2LanguageProvider extends LanguageProvider {
         //Tooltips
         add("buildinggadgets2.tooltips.holdshift", "Hold Shift for details");
         add("buildinggadgets2.tooltips.energy", "Energy: %d/%d");
+        add("buildinggadgets2.configuration.title", "Building Gadgets 2 Settings");
+        add("buildinggadgets2.configuration.allSettings", "All Settings...");
+        add("buildinggadgets2.configuration.requirePower.server", "Set by the server you're connected to");
         add("buildinggadgets2.configuration.power", "Power");
         add("buildinggadgets2.configuration.requirePower", "Require Power");
         add("buildinggadgets2.configuration.requirePower.tooltip", "Whether gadgets need Forge Energy to work. Turn off to use them without charging.");

@@ -7,26 +7,27 @@ import com.direwolf20.buildinggadgets2.client.events.EventKeyInput;
 import com.direwolf20.buildinggadgets2.client.events.RenderLevelLast;
 import com.direwolf20.buildinggadgets2.client.renderer.GuiTemplatePreview;
 import com.direwolf20.buildinggadgets2.client.renderer.OurRenderTypes;
+import com.direwolf20.buildinggadgets2.client.screen.BG2ConfigScreen;
 import com.direwolf20.buildinggadgets2.client.screen.TemplateManagerGUI;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterClientTooltipComponentFactoriesEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.event.RegisterPictureInPictureRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent;
-import net.neoforged.neoforge.client.gui.ConfigurationScreen;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 
 @EventBusSubscriber(modid = BuildingGadgets2.MODID, value = Dist.CLIENT)
 public class ClientSetup {
     public static void registerConfigScreen(ModContainer container) {
-        // NeoForge's generated config screen, reachable from the mod list
-        container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
+        // Quick settings screen from the mod list; it links through to NeoForge's full config screen
+        container.registerExtensionPoint(IConfigScreenFactory.class, BG2ConfigScreen::new);
     }
 
     public static void init(final FMLClientSetupEvent event) {
@@ -35,6 +36,8 @@ public class ClientSetup {
         //Register our Render Events Class
         NeoForge.EVENT_BUS.register(RenderLevelLast.class);
         NeoForge.EVENT_BUS.register(EventKeyInput.class);
+        // Forget the last server's power setting so singleplayer goes back to the local config
+        NeoForge.EVENT_BUS.addListener((ClientPlayerNetworkEvent.LoggingOut loggingOut) -> Config.setServerRequirePower(null));
     }
 
     @SubscribeEvent

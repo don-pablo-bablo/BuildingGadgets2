@@ -4,6 +4,7 @@ import com.direwolf20.buildinggadgets2.common.blockentities.TemplateManagerBE;
 import com.direwolf20.buildinggadgets2.common.commands.BuildingGadgets2Commands;
 import com.direwolf20.buildinggadgets2.common.items.BaseGadget;
 import com.direwolf20.buildinggadgets2.common.network.PacketHandler;
+import com.direwolf20.buildinggadgets2.common.network.handler.PacketPowerSetting;
 import com.direwolf20.buildinggadgets2.setup.BG2DataComponents;
 import com.direwolf20.buildinggadgets2.setup.ClientSetup;
 import com.direwolf20.buildinggadgets2.setup.Config;
@@ -36,6 +37,8 @@ public class BuildingGadgets2 {
         eventBus.addListener(this::registerCapabilities);
         eventBus.addListener(PacketHandler::registerNetworking);
         NeoForge.EVENT_BUS.addListener(BuildingGadgets2Commands::registerCommands);
+        NeoForge.EVENT_BUS.addListener(PacketPowerSetting::onPlayerLoggedIn);
+        eventBus.addListener(PacketPowerSetting::onConfigReloaded);
 
         if (FMLEnvironment.getDist().isClient()) {
             eventBus.addListener(ClientSetup::init);

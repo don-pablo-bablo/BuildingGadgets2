@@ -4,6 +4,7 @@ package com.direwolf20.buildinggadgets2.setup;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.ModConfigSpec;
+import org.jspecify.annotations.Nullable;
 
 public class Config {
     public static final ModConfigSpec.Builder CLIENT_BUILDER = new ModConfigSpec.Builder();
@@ -32,11 +33,13 @@ public class Config {
     public static ModConfigSpec.IntValue RAYTRACE_RANGE;
 
     public static ModConfigSpec.BooleanValue REQUIRE_POWER;
-    private static ModConfigSpec SERVER_SPEC;
+    private static ModConfigSpec COMMON_SPEC;
+    // The connected server's requirePower, when playing on a remote server. Null in singleplayer/LAN host.
+    private static volatile @Nullable Boolean serverRequirePower;
 
     public static void register(ModContainer container) {
         registerCommonConfigs(container);
-        registerServerConfigs(container);
+        //registerServerConfigs();
         //registerClientConfigs();
     }
 
@@ -56,29 +59,29 @@ public class Config {
         COMMON_BUILDER.pop();
 
         // COMMON was renamed to LOCAL in 26.3; keep the old filename so existing configs still load
-        container.registerConfig(ModConfig.Type.LOCAL, COMMON_BUILDER.build(), "buildinggadgets2-common.toml");
+        COMMON_SPEC = COMMON_BUILDER.build();
+        container.registerConfig(ModConfig.Type.LOCAL, COMMON_SPEC, "buildinggadgets2-common.toml");
     }
 
     private static void registerServerConfigs(ModContainer container) {
         //GeneratorConfig.registerServerConfig(SERVER_BUILDER);
         //PowergenConfig.registerServerConfig(SERVER_BUILDER);
-        SERVER_BUILDER.comment("Power settings").push(CATEGORY_POWER);
-        REQUIRE_POWER = SERVER_BUILDER.comment("Whether gadgets need Forge Energy to work. Set to false to use them without charging;",
-                        "the per-gadget costs in the common config are then ignored.")
-                .define("requirePower", true);
-        SERVER_BUILDER.pop();
-
-        // Synced so the server decides and every client agrees (energy bars, previews, cost checks)
-        SERVER_SPEC = SERVER_BUILDER.build();
-        container.registerConfig(ModConfig.Type.SYNCED, SERVER_SPEC);
+        container.registerConfig(ModConfig.Type.SYNCED, SERVER_BUILDER.build());
     }
 
     /**
-     * Whether gadgets consume energy. Synced configs only load with a world, so this assumes power is
-     * required until the server's value is known.
+     * Whether gadgets consume energy. On a remote server the server's setting wins (it's sent on login,
+     * see {@code PowerSettingPayload}); otherwise this instance's own config decides.
      */
     public static boolean isPowerRequired() {
-        return SERVER_SPEC == null || !SERVER_SPEC.isLoaded() || REQUIRE_POWER.get();
+        Boolean fromServer = serverRequirePower;
+        if (fromServer != null)
+            return fromServer;
+        return COMMON_SPEC == null || !COMMON_SPEC.isLoaded() || REQUIRE_POWER.get();
+    }
+
+    public static void setServerRequirePower(@Nullable Boolean requirePower) {
+        serverRequirePower = requirePower;
     }
 
     private static void generalConfig() {
@@ -87,6 +90,10 @@ public class Config {
     }
 
     private static void powerConfig() {
+        REQUIRE_POWER = COMMON_BUILDER.comment("Whether gadgets need Forge Energy to work. Set to false to use them without charging;",
+                        "the per-gadget costs below are then ignored. On a multiplayer server, the server's setting applies.")
+                .define("requirePower", true);
+
         COMMON_BUILDER.comment("Building Gadget").push(SUBCATEGORY_BUILDINGGADGET);
         BUILDINGGADGET_MAXPOWER = COMMON_BUILDER.comment("Maximum power for the Building Gadget")
                 .defineInRange("maxPower", 500000, 0, Integer.MAX_VALUE);

@@ -30,5 +30,6 @@ public class PacketHandler {
 
         //Going to Client
         registrar.playToClient(SendCopyDataPayload.TYPE, SendCopyDataPayload.STREAM_CODEC, PacketSendCopyData.get()::handle);
+        registrar.playToClient(PowerSettingPayload.TYPE, PowerSettingPayload.STREAM_CODEC, PacketPowerSetting.get()::handle);
     }
 }
