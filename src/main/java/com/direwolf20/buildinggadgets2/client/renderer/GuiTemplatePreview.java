@@ -3,32 +3,38 @@ package com.direwolf20.buildinggadgets2.client.renderer;
 import com.direwolf20.buildinggadgets2.util.FakeRenderingWorld;
 import com.direwolf20.buildinggadgets2.util.datatypes.StatePos;
 import com.mojang.blaze3d.ProjectionType;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.systems.CommandEncoder;
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexSorting;
+import com.mojang.renderpearl.api.GpuFormat;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.commands.RenderPass;
+import com.mojang.renderpearl.api.device.GpuDevice;
+import com.mojang.renderpearl.api.pipeline.IndexType;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.textures.FilterMode;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
+import net.minecraft.client.gui.render.GuiRenderer;
+import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.gui.render.pip.PictureInPictureRenderer;
-import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.BlockQuadOutput;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.state.gui.BlitRenderState;
+import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import net.minecraft.client.renderer.state.gui.pip.PictureInPictureRenderState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.ARGB;
@@ -39,36 +45,28 @@ import org.joml.Matrix3x2f;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
-import org.joml.Vector4f;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
-import java.util.OptionalInt;
 import java.util.UUID;
 
 /**
  * 3D template preview rendered into the Template Manager GUI panel.
  * <p>
- * Implemented as a {@link PictureInPictureRenderer}: vanilla allocates a color+depth render target
- * sized to the panel rect times the GUI scale, redirects {@link RenderSystem#outputColorTextureOverride}
- * to point at it, invokes {@link #renderToTexture}, then blits the result into the GUI at the panel's
- * screen position with scissor applied. This is the canonical 26.1 "3D-scene-inside-a-GUI-rect" path
- * (§3.21 bucket (c) of {@code PORTING_1.21.1_TO_26.1.md}).
+ * Registered as a {@link PictureInPictureRenderer}, but as of 26.3 the parent's {@link #prepare} only lets
+ * subclasses submit geometry, which it then draws with a hard-coded orthographic projection. That rules out
+ * both the perspective camera and the retained GPU mesh this preview relies on, so {@link #prepare} is
+ * overridden wholesale: we own a color+depth texture pair sized to the panel, draw the cached meshes into
+ * it with a perspective projection, and queue the same GUI blit the parent would.
  * <p>
- * The parent class's {@link #prepare} body hardcodes an orthographic projection for the PiP render
- * target, and also pre-seeds the {@link PoseStack} with a {@code translate(width/2, height, 0)}
- * plus {@code scale(scale, scale, -scale)} that presumes ortho. Both are wrong for a 3D rotatable
- * preview. Fix: this renderer overrides the projection to perspective inside
- * {@link #renderToTexture} (vanilla runs it after the ortho setup and restores projection itself at
- * the GUI blit stage), and resets the PoseStack to identity before applying its own model-view.
- * <p>
- * Inside {@code renderToTexture} the retained-GPU-mesh bake/draw pattern from
- * {@link VBORenderer} is replayed against a private per-instance {@link LayerCache} — so the GUI
- * preview cache is independent of VBORenderer's in-world preview cache and the two never thrash
- * each other when a player holds a loaded template and also aims a gadget at the world.
+ * The retained-GPU-mesh bake/draw pattern from {@link VBORenderer} is replayed against a private
+ * per-instance {@link LayerCache} — so the GUI preview cache is independent of VBORenderer's in-world
+ * preview cache and the two never thrash each other when a player holds a loaded template and also aims a
+ * gadget at the world.
  */
 public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePreview.State> {
     private static final ChunkSectionLayer[] LAYERS = ChunkSectionLayer.values();
@@ -86,16 +84,17 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
     // Scratch ring for sorted-index rebuilds. One per renderer instance; fine — pooled across frames.
     private final ByteBufferBuilder sortIndexScratch = new ByteBufferBuilder(131072);
 
-    // Our own projection (perspective) that stomps the parent's ortho before we draw.
+    // Our own perspective projection and render targets; the parent's are private and ortho-only.
     private final ProjectionMatrixBuffer projectionMatrixBuffer = new ProjectionMatrixBuffer("BG2 template preview");
     private final Projection projection = new Projection();
+    private @Nullable GpuTexture colorTexture;
+    private @Nullable GpuTextureView colorTextureView;
+    private @Nullable GpuTexture depthTexture;
+    private @Nullable GpuTextureView depthTextureView;
 
     // Non-AO model renderer. Free-floating ghost blocks: don't cull against neighbors.
     private @Nullable ModelBlockRenderer modelBlockRenderer;
 
-    public GuiTemplatePreview(MultiBufferSource.BufferSource bufferSource) {
-        super(bufferSource);
-    }
 
     @Override
     public Class<State> getRenderStateClass() {
@@ -108,14 +107,6 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
     }
 
     @Override
-    protected float getTranslateY(int height, int guiScale) {
-        // Parent uses this in its presumed-ortho PoseStack pre-seed. We reset the PoseStack to
-        // identity inside renderToTexture so this value never actually reaches the draw — override
-        // returns center-of-height which at least leaves the ortho ready for vanilla's baseline.
-        return height / 2.0f;
-    }
-
-    @Override
     public boolean canBeReusedFor(State state, int textureWidth, int textureHeight) {
         // Reuse whenever the texture dimensions match. The actual mesh cache lives on this renderer
         // instance and is keyed by state's template UUID, so if the template swapped we rebuild
@@ -124,53 +115,105 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
     }
 
     @Override
-    protected void renderToTexture(State state, PoseStack poseStack) {
+    public void prepare(State state, GuiRenderState guiRenderState, FeatureRenderDispatcher featureRenderDispatcher, int guiScale) {
+        int texW = (state.x1() - state.x0()) * guiScale;
+        int texH = (state.y1() - state.y0()) * guiScale;
+        if (texW <= 0 || texH <= 0) {
+            return;
+        }
         if (state.statePosList != cachedList || !java.util.Objects.equals(state.templateUuid, cachedUuid)) {
             rebuildCache(state);
         }
-        if (layerCaches.isEmpty()) {
-            return;
+        prepareTextures(texW, texH);
+
+        if (!layerCaches.isEmpty()) {
+            // Perspective projection sized to the texture so the aspect ratio matches the GUI rect we blit into.
+            RenderSystem.backupProjectionMatrix();
+            projection.setupPerspective(0.05f, 1000.0f, 60.0f, texW, texH);
+            RenderSystem.setProjectionMatrix(projectionMatrixBuffer.getBuffer(projection), ProjectionType.PERSPECTIVE);
+
+            // Camera pulled back along -Z by (radius * 2.5 - zoom). Larger radius → camera further away.
+            // Zoom is added directly — positive zoom pushes the camera forward, matching the old code.
+            // Then rotate, and center the template on the origin so rotation pivots around its center.
+            float cameraDistance = Math.max(1.0f, cachedRadius * 2.5f - state.zoom * 0.01f);
+            Matrix4f modelView = new Matrix4f()
+                    .translate(state.panX * 0.01f, -state.panY * 0.01f, -cameraDistance)
+                    .rotateX(state.rotX * (float) Math.PI / 180.0f)
+                    .rotateY(state.rotY * (float) Math.PI / 180.0f)
+                    .translate(-cachedCenterX, -cachedCenterY, -cachedCenterZ);
+
+            Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
+            modelViewStack.pushMatrix();
+            modelViewStack.identity().mul(modelView);
+
+            try (RenderPass pass = RenderSystem.getDevice()
+                    .createCommandEncoder()
+                    .createRenderPass(() -> "BG2 template preview", colorTextureView, Optional.empty(), depthTextureView, OptionalDouble.empty())) {
+                RenderSystem.bindDefaultUniforms(pass);
+                drawLayer(pass, ChunkSectionLayer.SOLID, OurRenderTypes.RenderBlock);
+                drawLayer(pass, ChunkSectionLayer.CUTOUT, OurRenderTypes.RenderBlock);
+                drawLayer(pass, ChunkSectionLayer.TRANSLUCENT, OurRenderTypes.RenderBlock);
+            } finally {
+                modelViewStack.popMatrix();
+                RenderSystem.restoreProjectionMatrix();
+            }
         }
 
-        // Step 2: override projection. Parent set an ortho projection for the PiP texture; we
-        // want perspective for the rotatable 3D view. The texture is sized to
-        // (panelWidth * guiScale, panelHeight * guiScale) — use the texture dimensions so the
-        // aspect ratio matches the GUI rect vanilla will blit into.
-        int texW = (state.x1() - state.x0()) * state.guiScale;
-        int texH = (state.y1() - state.y0()) * state.guiScale;
-        RenderSystem.backupProjectionMatrix();
-        projection.setupPerspective(0.05f, 1000.0f, 60.0f, texW, texH);
-        RenderSystem.setProjectionMatrix(projectionMatrixBuffer.getBuffer(projection), ProjectionType.PERSPECTIVE);
+        guiRenderState.addBlitToCurrentLayer(
+                new BlitRenderState(
+                        RenderPipelines.GUI_TEXTURED_PREMULTIPLIED_ALPHA,
+                        TextureSetup.singleTexture(colorTextureView, RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST)),
+                        state.pose(),
+                        state.x0(),
+                        state.y0(),
+                        state.x1(),
+                        state.y1(),
+                        0.0F,
+                        1.0F,
+                        1.0F,
+                        0.0F,
+                        -1,
+                        state.scissorArea(),
+                        null
+                )
+        );
+    }
 
-        // Step 3: build model-view. Parent pre-seeded poseStack with an ortho-presuming transform
-        // — scrap it. The pose passed to us is fresh (constructed at prepare entry in the parent),
-        // so setIdentity() fully resets. Then apply user's rotate/zoom/pan, then a translate that
-        // centers the bake-time bounding-box at the origin.
-        poseStack.setIdentity();
-        // Camera pulled back along -Z by (radius * 2 - zoom). Larger radius → camera further away.
-        // Zoom is added directly — positive zoom pushes the camera forward, matching the old code.
-        float cameraDistance = Math.max(1.0f, cachedRadius * 2.5f - state.zoom * 0.01f);
-        poseStack.translate(state.panX * 0.01f, -state.panY * 0.01f, -cameraDistance);
-        poseStack.mulPose(new org.joml.Quaternionf().setAngleAxis(state.rotX * (float) Math.PI / 180.0f, 1, 0, 0));
-        poseStack.mulPose(new org.joml.Quaternionf().setAngleAxis(state.rotY * (float) Math.PI / 180.0f, 0, 1, 0));
-        // Center the template on the origin so rotation pivots around its center, not its corner.
-        poseStack.translate(-cachedCenterX, -cachedCenterY, -cachedCenterZ);
+    @Override
+    protected void renderToTexture(State state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector) {
+        // Unused: prepare() is overridden and draws the retained meshes itself.
+    }
 
-        // Step 4: push the PoseStack's top matrix onto the RenderSystem model-view stack. Our
-        // manual draw body (mirrors RenderType.draw()) reads RenderSystem.getModelViewMatrix() —
-        // not a PoseStack — for DynamicTransforms, same as VBORenderer does for the in-world path.
-        Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
-        modelViewStack.pushMatrix();
-        modelViewStack.mul(poseStack.last().pose());
-
-        try {
-            drawLayer(ChunkSectionLayer.SOLID, OurRenderTypes.RenderBlock);
-            drawLayer(ChunkSectionLayer.CUTOUT, OurRenderTypes.RenderBlock);
-            drawLayer(ChunkSectionLayer.TRANSLUCENT, OurRenderTypes.RenderBlock);
-        } finally {
-            modelViewStack.popMatrix();
-            RenderSystem.restoreProjectionMatrix();
+    /**
+     * (Re)creates the color+depth targets when the panel size changes, then clears them. Mirrors the
+     * parent's private texture management.
+     */
+    private void prepareTextures(int width, int height) {
+        if (colorTexture != null && (colorTexture.getWidth(0) != width || colorTexture.getHeight(0) != height)) {
+            closeTextures();
         }
+
+        GpuDevice device = RenderSystem.getDevice();
+        if (colorTexture == null) {
+            colorTexture = device.createTexture(() -> "UI " + getTextureLabel() + " texture", 13, GpuFormat.RGBA8_UNORM, width, height, 1, 1);
+            colorTextureView = device.createTextureView(colorTexture);
+            GpuFormat depthFormat = Minecraft.getInstance().gameRenderer.mainRenderTarget().getDepthTexture().getFormat();
+            depthTexture = device.createTexture(() -> "UI " + getTextureLabel() + " depth texture", 9, depthFormat, width, height, 1, 1);
+            depthTextureView = device.createTextureView(depthTexture);
+        }
+
+        device.createCommandEncoder().clearColorAndDepthTextures(colorTexture, GuiRenderer.CLEAR_COLOR, depthTexture, 0.0);
+    }
+
+    private void closeTextures() {
+        if (colorTextureView != null) colorTextureView.close();
+        if (colorTexture != null) colorTexture.close();
+        if (depthTextureView != null) depthTextureView.close();
+        if (depthTexture != null) depthTexture.close();
+        colorTextureView = null;
+        colorTexture = null;
+        depthTextureView = null;
+        depthTexture = null;
     }
 
     /**
@@ -221,9 +264,9 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
         Map<ChunkSectionLayer, BufferBuilder> builders = new EnumMap<>(ChunkSectionLayer.class);
         Map<ChunkSectionLayer, ByteBufferBuilder> byteBuilders = new EnumMap<>(ChunkSectionLayer.class);
         for (ChunkSectionLayer layer : LAYERS) {
-            ByteBufferBuilder bb = new ByteBufferBuilder(layer.pipeline().getVertexFormat().getVertexSize() * 1024);
+            ByteBufferBuilder bb = new ByteBufferBuilder(layer.vertexFormat().getVertexSize() * 1024);
             byteBuilders.put(layer, bb);
-            builders.put(layer, new BufferBuilder(bb, VertexFormat.Mode.QUADS, layer.pipeline().getVertexFormat()));
+            builders.put(layer, new BufferBuilder(bb, PrimitiveTopology.QUADS, layer.vertexFormat()));
         }
 
         final float alpha = 1.0f;
@@ -310,79 +353,14 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
         cachedUuid = state.templateUuid;
     }
 
-    /**
-     * Mirrors {@link RenderType#draw(MeshData)}'s body against a pre-uploaded vertex GpuBuffer.
-     * Copy of {@link VBORenderer}'s {@code drawLayer}, minus the layering-transform handling
-     * (VIEW_OFFSET_Z_LAYERING's effect is a no-op here since there's no real chunk geometry to
-     * avoid Z-fighting against in the GUI preview).
-     */
-    private void drawLayer(ChunkSectionLayer layer, RenderType bg2Type) {
+    private void drawLayer(RenderPass pass, ChunkSectionLayer layer, RenderType bg2Type) {
         LayerCache cache = layerCaches.get(layer);
         if (cache == null || cache.vertexBuffer == null || cache.indexCount == 0) return;
 
-        RenderSetup setup = bg2Type.state;
-        java.util.function.Consumer<Matrix4fStack> layeringModifier = setup.layeringTransform.getModifier();
-        Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
-        if (layeringModifier != null) {
-            modelViewStack.pushMatrix();
-            layeringModifier.accept(modelViewStack);
-        }
-
-        GpuBufferSlice dynamicTransforms = RenderSystem.getDynamicUniforms()
-                .writeTransform(
-                        RenderSystem.getModelViewMatrix(),
-                        new Vector4f(1f, 1f, 1f, 1f),
-                        new Vector3f(),
-                        setup.textureTransform.getMatrix());
-        Map<String, RenderSetup.TextureAndSampler> textures = setup.getTextures();
-
-        // Output target: use whatever RenderSystem's override currently points at — vanilla's
-        // PictureInPictureRenderer set it to our PiP color/depth textures before calling
-        // renderToTexture. That's the whole reason PiP works: the manual draw writes to them.
-        RenderTarget renderTarget = bg2Type.outputTarget().getRenderTarget();
-        GpuTextureView colorTexture = RenderSystem.outputColorTextureOverride != null
-                ? RenderSystem.outputColorTextureOverride
-                : renderTarget.getColorTextureView();
-        GpuTextureView depthTexture = renderTarget.useDepth
-                ? (RenderSystem.outputDepthTextureOverride != null
-                        ? RenderSystem.outputDepthTextureOverride
-                        : renderTarget.getDepthTextureView())
-                : null;
-
-        GpuBuffer indices;
-        VertexFormat.IndexType indexType;
-        if (cache.sortedIndexBuffer != null) {
-            indices = cache.sortedIndexBuffer;
-            indexType = cache.autoIndexType;
-        } else {
-            RenderSystem.AutoStorageIndexBuffer auto = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-            indices = auto.getBuffer(cache.indexCount);
-            indexType = auto.type();
-        }
-
-        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        try (RenderPass pass = encoder.createRenderPass(
-                () -> "BG2 gui preview draw " + layer.name(),
-                colorTexture, OptionalInt.empty(),
-                depthTexture, OptionalDouble.empty())) {
-            pass.setPipeline(setup.pipeline);
-            // No scissor dance — vanilla's PiP render target is our whole drawable area, and the
-            // final GUI-rect scissor is applied by the BlitRenderState step *after* renderToTexture
-            // returns. Setting a scissor here would clip against main-window coordinates, which
-            // are irrelevant to the off-screen PiP target.
-            RenderSystem.bindDefaultUniforms(pass);
-            pass.setUniform("DynamicTransforms", dynamicTransforms);
-            pass.setVertexBuffer(0, cache.vertexBuffer);
-            for (Map.Entry<String, RenderSetup.TextureAndSampler> e : textures.entrySet()) {
-                pass.bindTexture(e.getKey(), e.getValue().textureView(), e.getValue().sampler());
-            }
-            pass.setIndexBuffer(indices, indexType);
-            pass.drawIndexed(0, 0, cache.indexCount, 1);
-        }
-
-        if (layeringModifier != null) {
-            modelViewStack.popMatrix();
-        }
+        // No scissor: the off-screen target is our whole drawable area, and the GUI-rect scissor is
+        // applied by the blit afterwards. A render-type scissor would clip in main-window coordinates.
+        VBORenderer.drawRetainedMesh(pass, "BG2 gui preview draw " + layer.name(), bg2Type, cache.vertexBuffer,
+                cache.indexCount, cache.sortedIndexBuffer, cache.autoIndexType, false);
     }
 
     private void clearCache() {
@@ -393,6 +371,7 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
     @Override
     public void close() {
         clearCache();
+        closeTextures();
         sortIndexScratch.close();
         projectionMatrixBuffer.close();
         super.close();
@@ -405,7 +384,7 @@ public class GuiTemplatePreview extends PictureInPictureRenderer<GuiTemplatePrev
     private static final class LayerCache implements AutoCloseable {
         GpuBuffer vertexBuffer;
         int indexCount;
-        VertexFormat.IndexType autoIndexType;
+        IndexType autoIndexType;
         GpuBuffer sortedIndexBuffer;
         MeshData.SortState sortState;
 

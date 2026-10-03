@@ -21,16 +21,16 @@ public class BG2BlockTags extends BlockTagsProvider {
     @Override
     protected void addTags(HolderLookup.Provider provider) {
         tag(BG2Tags.BG2DENY)
-                .add(Blocks.PISTON_HEAD)
-                .add(Blocks.BEDROCK)
-                .add(Blocks.END_PORTAL_FRAME)
-                .add(Blocks.CANDLE_CAKE)
+                .add(Blocks.PISTON_HEAD.builtInRegistryHolder().key())
+                .add(Blocks.BEDROCK.builtInRegistryHolder().key())
+                .add(Blocks.END_PORTAL_FRAME.builtInRegistryHolder().key())
+                .add(Blocks.CANDLE_CAKE.builtInRegistryHolder().key())
                 .addTag(BlockTags.BEDS)
                 .addTag(BlockTags.PORTALS)
                 .addTag(BlockTags.DOORS);
 
         tag(Tags.Blocks.RELOCATION_NOT_SUPPORTED)
-                .add(Registration.RenderBlock.get());
+                .add(Registration.RenderBlock.getKey());
     }
 
     @Override

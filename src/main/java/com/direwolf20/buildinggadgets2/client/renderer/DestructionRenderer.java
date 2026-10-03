@@ -6,9 +6,8 @@ import com.direwolf20.buildinggadgets2.util.GadgetNBT;
 import com.direwolf20.buildinggadgets2.util.GadgetUtils;
 import com.direwolf20.buildinggadgets2.util.VectorHelper;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
@@ -17,11 +16,13 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class DestructionRenderer {
-    public static void render(RenderLevelStageEvent evt, Player player, ItemStack gadget) {
+    public static void render(SubmitNodeCollector collector, PoseStack stack, Player player, ItemStack gadget) {
         //if (!GadgetDestruction.getOverlay(gadget)) //TODO
         //    return;
 
@@ -38,26 +39,27 @@ public class DestructionRenderer {
         if (level.getBlockState(startBlock) == Registration.RenderBlock.get().defaultBlockState())
             return;
 
-        Vec3 playerPos = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+        Vec3 playerPos = Minecraft.getInstance().gameRenderer.mainCamera().position();
 
-        PoseStack stack = evt.getPoseStack();
-        stack.pushPose();
-        stack.translate(-playerPos.x(), -playerPos.y(), -playerPos.z());
-
-        MultiBufferSource.BufferSource buffer = Minecraft.getInstance().renderBuffers().bufferSource();
-        VertexConsumer builder = buffer.getBuffer(OurRenderTypes.MissingBlockOverlay);
         final int[] counter = {BuildingUtils.getEnergyStored(gadget)};
         final int energyCost = BuildingUtils.getEnergyCost(gadget);
+        List<BlockPos> affected = new ArrayList<>();
         //Todo More Efficient for more FPS, consider a VBO?
         GadgetUtils.getDestructionArea(level, startBlock, facing, player, gadget)
                 .forEach(pos -> {
                     if (counter[0] >= energyCost || player.isCreative())
-                        MyRenderMethods.renderBoxSolid(stack.last().pose(), builder, pos.pos, 1, 0, 0, 0.35f);
+                        affected.add(pos.pos);
                     counter[0] -= energyCost;
                 });
+        if (affected.isEmpty())
+            return;
 
+        stack.pushPose();
+        stack.translate(-playerPos.x(), -playerPos.y(), -playerPos.z());
+        collector.submitCustomGeometry(stack, OurRenderTypes.MissingBlockOverlay, (pose, builder) -> {
+            for (BlockPos pos : affected)
+                MyRenderMethods.renderBoxSolid(pose.pose(), builder, pos, 1, 0, 0, 0.35f);
+        });
         stack.popPose();
-        //RenderSystem.disableDepthTest();
-        buffer.endBatch(); // @mcp: draw = finish
     }
 }

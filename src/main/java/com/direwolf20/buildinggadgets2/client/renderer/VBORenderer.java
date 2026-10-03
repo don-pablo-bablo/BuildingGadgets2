@@ -6,21 +6,18 @@ import com.direwolf20.buildinggadgets2.setup.Registration;
 import com.direwolf20.buildinggadgets2.util.*;
 import com.direwolf20.buildinggadgets2.util.datatypes.StatePos;
 import com.direwolf20.buildinggadgets2.util.modes.BaseMode;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.systems.CommandEncoder;
-import com.mojang.blaze3d.systems.GpuDevice;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.commands.CommandEncoder;
+import com.mojang.renderpearl.api.device.GpuDevice;
+import com.mojang.renderpearl.api.pipeline.IndexType;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.systems.ScissorState;
-import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.QuadInstance;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -29,8 +26,8 @@ import net.minecraft.client.renderer.block.BlockQuadOutput;
 import net.minecraft.client.renderer.block.ModelBlockRenderer;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.rendertype.LayeringTransform;
-import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.SubmitNodeCollector;
+import net.minecraft.client.renderer.rendertype.PreparedRenderType;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -49,18 +46,15 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import org.joml.Matrix4fStack;
 import org.joml.Vector3f;
-import org.joml.Vector4f;
+import org.jspecify.annotations.Nullable;
 
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.OptionalDouble;
-import java.util.OptionalInt;
 import java.util.UUID;
 
 /**
@@ -104,7 +98,7 @@ public class VBORenderer {
     private static final class LayerCache implements AutoCloseable {
         GpuBuffer vertexBuffer;      // persistent; lives across frames.
         int indexCount;              // drawIndexed(0, 0, indexCount, 1).
-        VertexFormat.IndexType autoIndexType;  // for the non-sorted path (from sharedSequentialQuad).
+        IndexType autoIndexType;  // for the non-sorted path (from sharedSequentialQuad).
 
         GpuBuffer sortedIndexBuffer; // persistent; translucent only.
         MeshData.SortState sortState;// centroids for re-sorting.
@@ -133,30 +127,80 @@ public class VBORenderer {
     }
 
     /**
-     * Cache-miss driver. Called from the {@link RenderLevelStageEvent.AfterTranslucentBlocks} handler
+     * Cache-miss driver. Called once per frame before {@link #drawRender} and re-bakes the preview
      * when {@link #shouldUpdateRender(Player, ItemStack)} says we need a fresh bake.
      */
-    public static void buildRender(RenderLevelStageEvent evt, Player player, ItemStack gadget) {
+    public static void buildRender(Player player, ItemStack gadget) {
         BlockHitResult lookingAt = VectorHelper.getLookingAt(player, gadget);
         BlockPos anchorPos = GadgetNBT.getAnchorPos(gadget);
         BlockPos renderPos = anchorPos.equals(GadgetNBT.nullPos) ? lookingAt.getBlockPos() : anchorPos;
         BaseMode mode = GadgetNBT.getMode(gadget);
 
-        GlobalPos boundTo = GadgetNBT.getBoundPos(gadget);
-        if (boundTo != null && boundTo.dimension().equals(player.level().dimension()))
-            drawBoundBox(evt.getPoseStack(), boundTo.pos());
-
         if (gadget.getItem() instanceof GadgetCopyPaste || gadget.getItem() instanceof GadgetCutPaste) {
             renderPos = renderPos.above();
             renderPos.offset(GadgetNBT.getRelativePaste(gadget));
-            if (mode.getId().getPath().equals("copy") || mode.getId().getPath().equals("cut")) {
-                drawCopyBox(evt.getPoseStack(), gadget, mode.getId().getPath());
+            if (mode.getId().getPath().equals("copy") || mode.getId().getPath().equals("cut"))
                 return;
-            }
         }
 
         if (shouldUpdateRender(player, gadget))
             generateRender(player.level(), renderPos, gadget, 0.5f);
+    }
+
+    /**
+     * Immediate-mode overlays (bound box, copy/cut selection box, missing-item markers). As of 26.3 these
+     * go through the submit-node collector instead of a buffer source, so they're driven from
+     * {@code SubmitCustomGeometryEvent} rather than the render-stage event.
+     */
+    public static void submitOverlays(SubmitNodeCollector collector, PoseStack poseStack, Player player, ItemStack gadget) {
+        BaseMode mode = GadgetNBT.getMode(gadget);
+
+        GlobalPos boundTo = GadgetNBT.getBoundPos(gadget);
+        if (boundTo != null && boundTo.dimension().equals(player.level().dimension()))
+            drawBoundBox(collector, poseStack, boundTo.pos());
+
+        if (gadget.getItem() instanceof GadgetCopyPaste || gadget.getItem() instanceof GadgetCutPaste) {
+            if (mode.getId().getPath().equals("copy") || mode.getId().getPath().equals("cut")) {
+                drawCopyBox(collector, poseStack, gadget, mode.getId().getPath());
+                return;
+            }
+        }
+
+        if (layerCaches.isEmpty() || statePosCache == null)
+            return;
+        PreviewTarget target = resolvePreviewTarget(player, gadget);
+        if (target == null)
+            return;
+
+        // Red overlay for blocks we don't have the items/energy to build.
+        boolean hasBound = GadgetNBT.getBoundPos(gadget) != null;
+        BlockState renderBlockState = GadgetNBT.getGadgetBlockState(gadget);
+        if ((gadget.getItem() instanceof GadgetBuilding || gadget.getItem() instanceof GadgetExchanger) && !player.isCreative() && !hasBound && renderBlockState.getFluidState().isEmpty()) {
+            ItemStack findStack = GadgetUtils.getItemForBlock(renderBlockState, player.level(), BlockPos.ZERO, player);
+            int availableItems = BuildingUtils.countItemStacks(player, findStack);
+            int energyStored = BuildingUtils.getEnergyStored(gadget);
+            int energyCost = BuildingUtils.getEnergyCost(gadget);
+            ArrayList<StatePos> missing = new ArrayList<>();
+            for (StatePos statePos : target.buildList()) {
+                if (availableItems <= 0 || energyStored < energyCost)
+                    missing.add(statePos);
+                availableItems--;
+                energyStored -= energyCost;
+            }
+            if (missing.isEmpty())
+                return;
+
+            Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
+            BlockPos renderPos = target.renderPos();
+            poseStack.pushPose();
+            poseStack.translate(-projectedView.x(), -projectedView.y(), -projectedView.z());
+            poseStack.translate(renderPos.getX(), renderPos.getY(), renderPos.getZ());
+            collector.submitCustomGeometry(poseStack, OurRenderTypes.MissingBlockOverlay, (pose, builder) -> {
+                for (StatePos statePos : missing)
+                    MyRenderMethods.renderBoxSolid(pose.pose(), builder, statePos.pos, 1, 0, 0, 0.35f);
+            });
+            poseStack.popPose();
+        }
     }
 
     public static boolean shouldUpdateRender(Player player, ItemStack gadget) {
@@ -228,9 +272,9 @@ public class VBORenderer {
         Map<ChunkSectionLayer, BufferBuilder> builders = new EnumMap<>(ChunkSectionLayer.class);
         Map<ChunkSectionLayer, ByteBufferBuilder> byteBuilders = new EnumMap<>(ChunkSectionLayer.class);
         for (ChunkSectionLayer layer : LAYERS) {
-            ByteBufferBuilder bb = new ByteBufferBuilder(layer.pipeline().getVertexFormat().getVertexSize() * 1024);
+            ByteBufferBuilder bb = new ByteBufferBuilder(layer.vertexFormat().getVertexSize() * 1024);
             byteBuilders.put(layer, bb);
-            builders.put(layer, new BufferBuilder(bb, VertexFormat.Mode.QUADS, layer.pipeline().getVertexFormat()));
+            builders.put(layer, new BufferBuilder(bb, PrimitiveTopology.QUADS, layer.vertexFormat()));
         }
 
         // Pre-compute the byte alpha we want on every vertex. ARGB.color(float, int) stomps the alpha byte
@@ -312,7 +356,7 @@ public class VBORenderer {
 
         // Build each non-empty layer's MeshData, upload its vertices to a persistent GpuBuffer,
         // then drop the MeshData. For translucent: also build a sorted index buffer on the GPU.
-        Vec3 projectedView = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+        Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
         Vec3 subtracted = projectedView.subtract(renderPos.getX(), renderPos.getY(), renderPos.getZ());
         Vector3f sortPos = new Vector3f((float) subtracted.x, (float) subtracted.y, (float) subtracted.z);
 
@@ -355,23 +399,23 @@ public class VBORenderer {
         }
     }
 
-    public static void drawCopyBox(PoseStack matrix, ItemStack gadget, String mode) {
-        Vec3 projectedView = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+    public static void drawCopyBox(SubmitNodeCollector collector, PoseStack matrix, ItemStack gadget, String mode) {
+        Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
         matrix.pushPose();
         matrix.translate(-projectedView.x(), -projectedView.y(), -projectedView.z());
         BlockPos start = GadgetNBT.getCopyStartPos(gadget);
         BlockPos end = GadgetNBT.getCopyEndPos(gadget);
         Color color = mode.equals("copy") ? Color.GREEN : Color.RED;
-        MyRenderMethods.renderCopy(matrix, start, end, color);
+        MyRenderMethods.renderCopy(collector, matrix, start, end, color);
         matrix.popPose();
     }
 
-    public static void drawBoundBox(PoseStack matrix, BlockPos blockPos) {
-        Vec3 projectedView = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+    public static void drawBoundBox(SubmitNodeCollector collector, PoseStack matrix, BlockPos blockPos) {
+        Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
         matrix.pushPose();
         matrix.translate(-projectedView.x(), -projectedView.y(), -projectedView.z());
         Color color = Color.BLUE;
-        MyRenderMethods.renderCopy(matrix, blockPos, blockPos, color);
+        MyRenderMethods.renderCopy(collector, matrix, blockPos, blockPos, color);
         matrix.popPose();
     }
 
@@ -392,38 +436,54 @@ public class VBORenderer {
         return false;
     }
 
+    private record PreviewTarget(BlockPos renderPos, ArrayList<StatePos> buildList) {
+    }
+
     /**
-     * Per-frame draw. Issues one manual {@link RenderPass} per cached layer, reusing the persistent
-     * {@link GpuBuffer}s populated by {@link #generateRender}. No CPU→GPU vertex re-upload.
+     * Works out where the cached preview should be drawn this frame, or null if it shouldn't be drawn.
      */
-    public static void drawRender(RenderLevelStageEvent evt, Player player, ItemStack gadget) {
-        if (layerCaches.isEmpty() || statePosCache == null) {
-            return;
-        }
-        Vec3 projectedView = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+    private static @Nullable PreviewTarget resolvePreviewTarget(Player player, ItemStack gadget) {
         BlockHitResult lookingAt = VectorHelper.getLookingAt(player, gadget);
         BlockPos anchorPos = GadgetNBT.getAnchorPos(gadget);
         BlockPos renderPos = anchorPos.equals(GadgetNBT.nullPos) ? lookingAt.getBlockPos() : anchorPos;
         BlockState lookingAtState = player.level().getBlockState(renderPos);
 
         if ((lookingAtState.isAir() && anchorPos.equals(GadgetNBT.nullPos)) || lookingAtState.getBlock().equals(Registration.RenderBlock.get()))
-            return;
+            return null;
         ArrayList<StatePos> buildList = new ArrayList<>();
         var mode = GadgetNBT.getMode(gadget);
         if (gadget.getItem() instanceof GadgetBuilding || gadget.getItem() instanceof GadgetExchanger) {
             BlockState renderBlockState = GadgetNBT.getGadgetBlockState(gadget);
-            if (renderBlockState.isAir()) return;
+            if (renderBlockState.isAir()) return null;
             buildList = mode.collect(lookingAt.getDirection(), player, renderPos, renderBlockState);
 
-            if (buildList.isEmpty()) return;
+            if (buildList.isEmpty()) return null;
         } else if (gadget.getItem() instanceof GadgetCopyPaste || gadget.getItem() instanceof GadgetCutPaste) {
             if (mode.getId().getPath().equals("copy") || mode.getId().getPath().equals("cut")) {
-                return;
+                return null;
             }
             if (!GadgetNBT.hasCopyUUID(gadget) || !copyPasteUUIDCache.equals(GadgetNBT.getCopyUUID(gadget)))
-                return;
+                return null;
             renderPos = renderPos.above().offset(GadgetNBT.getRelativePaste(gadget));
         }
+        return new PreviewTarget(renderPos, buildList);
+    }
+
+    /**
+     * Per-frame draw. Issues one indexed draw per cached layer into {@code pass}, reusing the persistent
+     * {@link GpuBuffer}s populated by {@link #generateRender}. No CPU→GPU vertex re-upload.
+     * <p>
+     * The caller must have the camera view rotation applied to {@link RenderSystem#getModelViewStack()}.
+     */
+    public static void drawRender(RenderPass pass, Player player, ItemStack gadget) {
+        if (layerCaches.isEmpty() || statePosCache == null) {
+            return;
+        }
+        PreviewTarget target = resolvePreviewTarget(player, gadget);
+        if (target == null)
+            return;
+        BlockPos renderPos = target.renderPos();
+        Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
 
         // Re-sort translucent every N frames to kill the screendoor effect as the camera moves.
         int sortFrequency = isLargeRender ? 100 : 20;
@@ -434,10 +494,6 @@ public class VBORenderer {
             sortCounter++;
         }
 
-        // In 26.1 the event fires inside LevelRenderer's frame graph pass, and LevelRenderer has
-        // already pushed the camera view rotation onto RenderSystem.getModelViewStack() at
-        // renderLevel entry (LevelRenderer.java:482-483). Re-multiplying evt.getModelViewMatrix()
-        // here would stack the rotation twice. Just translate by (renderPos - camera).
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
         modelViewStack.translate(
@@ -447,111 +503,64 @@ public class VBORenderer {
 
         try {
             // Draw order: solid → cutout → translucent. Matches vanilla chunk draw order.
-            drawLayer(ChunkSectionLayer.SOLID, OurRenderTypes.RenderBlock);
-            drawLayer(ChunkSectionLayer.CUTOUT, OurRenderTypes.RenderBlock);
-            drawLayer(ChunkSectionLayer.TRANSLUCENT, OurRenderTypes.RenderBlock);
+            drawLayer(pass, ChunkSectionLayer.SOLID, OurRenderTypes.RenderBlock);
+            drawLayer(pass, ChunkSectionLayer.CUTOUT, OurRenderTypes.RenderBlock);
+            drawLayer(pass, ChunkSectionLayer.TRANSLUCENT, OurRenderTypes.RenderBlock);
         } finally {
             modelViewStack.popMatrix();
         }
-
-        // Red overlay for blocks we don't have the items/energy to build.
-        boolean hasBound = GadgetNBT.getBoundPos(gadget) != null;
-        BlockState renderBlockState = GadgetNBT.getGadgetBlockState(gadget);
-        if ((gadget.getItem() instanceof GadgetBuilding || gadget.getItem() instanceof GadgetExchanger) && !player.isCreative() && !hasBound && renderBlockState.getFluidState().isEmpty()) {
-            ItemStack findStack = GadgetUtils.getItemForBlock(renderBlockState, player.level(), BlockPos.ZERO, player);
-            int availableItems = BuildingUtils.countItemStacks(player, findStack);
-            int energyStored = BuildingUtils.getEnergyStored(gadget);
-            int energyCost = BuildingUtils.getEnergyCost(gadget);
-            PoseStack matrix = evt.getPoseStack();
-            var buffersource = Minecraft.getInstance().renderBuffers().bufferSource();
-            for (StatePos statePos : buildList) {
-                if (availableItems <= 0 || energyStored < energyCost) {
-                    matrix.pushPose();
-                    matrix.translate(-projectedView.x(), -projectedView.y(), -projectedView.z());
-                    matrix.translate(renderPos.getX(), renderPos.getY(), renderPos.getZ());
-                    var builder = buffersource.getBuffer(OurRenderTypes.MissingBlockOverlay);
-                    MyRenderMethods.renderBoxSolid(evt.getPoseStack().last().pose(), builder, statePos.pos, 1, 0, 0, 0.35f);
-                    matrix.popPose();
-                }
-                availableItems--;
-                energyStored -= energyCost;
-            }
-        }
     }
 
-    /**
-     * Run one manual {@link RenderPass} for a single cached layer. Mirrors the body of
-     * {@link RenderType#draw(MeshData)} but with a pre-uploaded GPU vertex buffer instead of the
-     * per-frame immediate upload.
-     */
-    private static void drawLayer(ChunkSectionLayer layer, RenderType bg2Type) {
+    private static void drawLayer(RenderPass pass, ChunkSectionLayer layer, RenderType bg2Type) {
         LayerCache cache = layerCaches.get(layer);
         if (cache == null || cache.vertexBuffer == null || cache.indexCount == 0) return;
 
-        RenderSetup state = bg2Type.state;
-        Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
-        java.util.function.Consumer<Matrix4fStack> layeringModifier = state.layeringTransform.getModifier();
-        if (layeringModifier != null) {
-            modelViewStack.pushMatrix();
-            layeringModifier.accept(modelViewStack);
-        }
+        drawRetainedMesh(pass, "BG2 preview draw " + layer.name(), bg2Type, cache.vertexBuffer, cache.indexCount,
+                cache.sortedIndexBuffer, cache.autoIndexType, true);
+    }
 
-        // Same dynamic transforms upload vanilla uses in RenderType.draw(). The pipeline's uniform layout
-        // expects a DynamicTransforms UBO slice — without this, the draw ends up with an identity MVP.
-        GpuBufferSlice dynamicTransforms = RenderSystem.getDynamicUniforms()
-                .writeTransform(
-                        RenderSystem.getModelViewMatrix(),
-                        new Vector4f(1f, 1f, 1f, 1f),
-                        new Vector3f(),
-                        state.textureTransform.getMatrix());
-        Map<String, RenderSetup.TextureAndSampler> textures = state.getTextures();
+    /**
+     * Issue one indexed draw of a retained mesh into {@code pass}. Mirrors {@link PreparedRenderType}'s draw
+     * but with a pre-uploaded GPU vertex buffer instead of the per-frame staged upload. Shared with
+     * {@link GuiTemplatePreview}.
+     */
+    static void drawRetainedMesh(RenderPass pass, String label, RenderType renderType, GpuBuffer vertexBuffer, int indexCount,
+                                 @Nullable GpuBuffer sortedIndexBuffer, IndexType sortedIndexType, boolean applyScissor) {
+        // prepare() snapshots the current model-view matrix (plus the type's layering transform) into the
+        // DynamicTransforms UBO and resolves the textures/samplers, exactly as vanilla does per draw.
+        PreparedRenderType prepared = renderType.prepare();
 
-        RenderTarget renderTarget = bg2Type.outputTarget().getRenderTarget();
-        GpuTextureView colorTexture = RenderSystem.outputColorTextureOverride != null
-                ? RenderSystem.outputColorTextureOverride
-                : renderTarget.getColorTextureView();
-        GpuTextureView depthTexture = renderTarget.useDepth
-                ? (RenderSystem.outputDepthTextureOverride != null ? RenderSystem.outputDepthTextureOverride : renderTarget.getDepthTextureView())
-                : null;
-
-        // Pick the index buffer: translucent uses our persistent sorted buffer, everyone else leans
+        // Pick the index buffer: sorted meshes use their persistent sorted buffer, everyone else leans
         // on RenderSystem's shared sequential-quad index buffer (also a persistent GPU buffer).
         GpuBuffer indices;
-        VertexFormat.IndexType indexType;
-        if (cache.sortedIndexBuffer != null) {
-            indices = cache.sortedIndexBuffer;
-            indexType = cache.autoIndexType;
+        IndexType indexType;
+        if (sortedIndexBuffer != null) {
+            indices = sortedIndexBuffer;
+            indexType = sortedIndexType;
         } else {
-            RenderSystem.AutoStorageIndexBuffer auto = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-            indices = auto.getBuffer(cache.indexCount);
+            RenderSystem.AutoStorageIndexBuffer auto = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
+            indices = auto.getBuffer(indexCount);
             indexType = auto.type();
         }
 
-        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        try (RenderPass pass = encoder.createRenderPass(
-                () -> "BG2 preview draw " + layer.name(),
-                colorTexture, OptionalInt.empty(),
-                depthTexture, OptionalDouble.empty())) {
-            pass.setPipeline(state.pipeline);
-
-            ScissorState scissorState = RenderSystem.getScissorStateForRenderTypeDraws();
-            if (scissorState.enabled()) {
-                pass.enableScissor(scissorState.x(), scissorState.y(), scissorState.width(), scissorState.height());
-            }
-
-            RenderSystem.bindDefaultUniforms(pass);
-            pass.setUniform("DynamicTransforms", dynamicTransforms);
-            pass.setVertexBuffer(0, cache.vertexBuffer);
-            for (Map.Entry<String, RenderSetup.TextureAndSampler> e : textures.entrySet()) {
-                pass.bindTexture(e.getKey(), e.getValue().textureView(), e.getValue().sampler());
-            }
-            pass.setIndexBuffer(indices, indexType);
-            pass.drawIndexed(0, 0, cache.indexCount, 1);
+        boolean scissor = applyScissor && prepared.scissorState().enabled();
+        pass.pushDebugGroup(() -> label);
+        pass.setPipeline(RenderSystem.getCompiledPipeline(prepared.pipeline()));
+        if (scissor) {
+            pass.enableScissor(prepared.scissorState().x(), prepared.scissorState().y(), prepared.scissorState().width(), prepared.scissorState().height());
         }
-
-        if (layeringModifier != null) {
-            modelViewStack.popMatrix();
+        RenderSystem.bindDefaultUniforms(pass);
+        pass.setUniform("DynamicTransforms", prepared.dynamicTransforms());
+        pass.setVertexBuffer(0, vertexBuffer.slice());
+        for (PreparedRenderType.Texture texture : prepared.textures()) {
+            pass.setUniform(texture.name(), texture.textureView(), texture.sampler());
         }
+        pass.setIndexBuffer(indices, indexType);
+        pass.drawIndexed(indexCount, 1, 0, 0, 0);
+        if (scissor) {
+            pass.disableScissor();
+        }
+        pass.popDebugGroup();
     }
 
     /**
@@ -561,7 +570,7 @@ public class VBORenderer {
     public static void sortAll(BlockPos lookingAt) {
         if (layerCaches.isEmpty()) return;
 
-        Vec3 projectedView = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+        Vec3 projectedView = Minecraft.getInstance().gameRenderer.mainCamera().position();
         Vec3 subtracted = projectedView.subtract(lookingAt.getX(), lookingAt.getY(), lookingAt.getZ());
         Vector3f sortPos = new Vector3f((float) subtracted.x, (float) subtracted.y, (float) subtracted.z);
         VertexSorting sorting = VertexSorting.byDistance(v -> -sortPos.distanceSquared(v));

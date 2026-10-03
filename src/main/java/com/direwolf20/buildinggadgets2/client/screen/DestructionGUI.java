@@ -206,7 +206,7 @@ public class DestructionGUI extends Screen {
 
     @Override
     public void tick() {
-        if (keyDown && !InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), KeyBindings.menuSettings.getKey().getValue())) {
+        if (keyDown && !InputConstants.isKeyDown(KeyBindings.menuSettings.getKey().getValue())) {
             onClose();
         }
         super.tick();
@@ -221,12 +221,8 @@ public class DestructionGUI extends Screen {
     public boolean keyPressed(KeyEvent event) {
         if (keyDown)
             return super.keyPressed(event);
-        int keyCode = event.key();
-        int scanCode = event.scancode();
-        InputConstants.Key mouseKey = keyCode == -1
-                ? InputConstants.Type.SCANCODE.getOrCreate(scanCode)
-                : InputConstants.Type.KEYSYM.getOrCreate(keyCode);
-        if (keyCode == 256 || minecraft.options.keyInventory.isActiveAndMatches(mouseKey)) {
+        InputConstants.Key mouseKey = InputConstants.getKey(event);
+        if (event.key() == InputConstants.KEY_ESCAPE || minecraft.options.keyInventory.isActiveAndMatches(mouseKey)) {
             onClose();
             return true;
         }

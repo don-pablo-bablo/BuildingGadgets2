@@ -2,6 +2,8 @@ package com.direwolf20.buildinggadgets2.datagen;
 
 import com.direwolf20.buildinggadgets2.BuildingGadgets2;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistrySetBuilder;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.data.DataGenerator;
 import net.minecraft.data.PackOutput;
 import net.minecraft.data.loot.LootTableProvider;
@@ -30,14 +32,14 @@ public class DataGenerators {
     public static void gatherServerData(GatherDataEvent.Server event) {
         DataGenerator generator = event.getGenerator();
         PackOutput packOutput = generator.getPackOutput();
-        CompletableFuture<HolderLookup.Provider> lookupProvider = event.getLookupProvider();
+        CompletableFuture<HolderLookup.Provider> lookupProvider = event.getWorldLookupProvider();
 
-        generator.addProvider(true, new BG2Recipes.Runner(packOutput, lookupProvider));
-        generator.addProvider(true, new LootTableProvider(
-                packOutput,
-                Collections.emptySet(),
-                List.of(new LootTableProvider.SubProviderEntry(BG2LootTables::new, LootContextParamSets.BLOCK)),
-                lookupProvider));
+        // Recipes and loot tables are reloadable registry entries as of 26.3
+        event.createReloadableRegistryObjects(new RegistrySetBuilder()
+                .add(BG2Recipes.bootstrap())
+                .add(Registries.LOOT_TABLE, new LootTableProvider(
+                        Collections.emptySet(),
+                        List.of(new LootTableProvider.SubProviderEntry(BG2LootTables::new, LootContextParamSets.BLOCK)))));
         generator.addProvider(true, new BG2BlockTags(packOutput, lookupProvider));
         generator.addProvider(true, new BG2ItemTags(packOutput, lookupProvider));
     }

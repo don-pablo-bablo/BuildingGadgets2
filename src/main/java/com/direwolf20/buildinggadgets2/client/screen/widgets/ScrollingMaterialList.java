@@ -1,6 +1,7 @@
 package com.direwolf20.buildinggadgets2.client.screen.widgets;
 
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.direwolf20.buildinggadgets2.common.worlddata.BG2DataClient;
 import com.direwolf20.buildinggadgets2.util.BuildingUtils;
 import com.direwolf20.buildinggadgets2.util.GadgetNBT;
@@ -17,7 +18,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import org.lwjgl.glfw.GLFW;
 
 import java.awt.*;
 import java.util.ArrayList;
@@ -102,7 +102,7 @@ public class ScrollingMaterialList extends EntryList<ScrollingMaterialList.Entry
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.key() == GLFW.GLFW_KEY_E) {
+        if (event.key() == InputConstants.KEY_E) {
             assert Minecraft.getInstance().player != null;
 
             Minecraft.getInstance().player.closeContainer();

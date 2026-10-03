@@ -15,7 +15,6 @@ import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.settings.IKeyConflictContext;
 import net.neoforged.neoforge.client.settings.KeyConflictContext;
-import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,13 +31,13 @@ public class KeyBindings {
 
     private static final List<KeyMapping> keyMappings = new ArrayList<>();
 
-    public static KeyMapping menuSettings = createBinding("settings_menu", GLFW.GLFW_KEY_G);
-    public static KeyMapping undo = createBinding("undo", GLFW.GLFW_KEY_U);
-    public static KeyMapping anchor = createBinding("anchor", GLFW.GLFW_KEY_H);
-    public static KeyMapping range = createBinding("range", GLFW.GLFW_KEY_R);
+    public static KeyMapping menuSettings = createBinding("settings_menu", InputConstants.KEY_G);
+    public static KeyMapping undo = createBinding("undo", InputConstants.KEY_U);
+    public static KeyMapping anchor = createBinding("anchor", InputConstants.KEY_H);
+    public static KeyMapping range = createBinding("range", InputConstants.KEY_R);
 
     private static KeyMapping createBinding(String name, int key) {
-        KeyMapping keyBinding = new KeyMapping(getKey(name), CONFLICT_CONTEXT_GADGET, InputConstants.Type.KEYSYM.getOrCreate(key), CATEGORY);
+        KeyMapping keyBinding = new KeyMapping(getKey(name), CONFLICT_CONTEXT_GADGET, InputConstants.Type.KEYBOARD.getOrCreate(key), CATEGORY);
         keyMappings.add(keyBinding);
         return keyBinding;
     }

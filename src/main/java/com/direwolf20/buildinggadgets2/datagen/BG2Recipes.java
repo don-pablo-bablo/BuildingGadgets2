@@ -1,20 +1,19 @@
 package com.direwolf20.buildinggadgets2.datagen;
 
 import com.direwolf20.buildinggadgets2.setup.Registration;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.data.PackOutput;
+import net.minecraft.advancements.Advancement;
+import net.minecraft.core.registries.MultiRegistryBootstrap;
+import net.minecraft.data.worldgen.BootstrapContext;
 import net.minecraft.data.recipes.RecipeCategory;
-import net.minecraft.data.recipes.RecipeOutput;
 import net.minecraft.data.recipes.RecipeProvider;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Recipe;
 import net.neoforged.neoforge.common.Tags;
-
-import java.util.concurrent.CompletableFuture;
 
 public class BG2Recipes extends RecipeProvider {
 
-    protected BG2Recipes(HolderLookup.Provider registries, RecipeOutput output) {
-        super(registries, output);
+    protected BG2Recipes(BootstrapContext<Recipe<?>> recipeOutput, BootstrapContext<Advancement> advancementOutput) {
+        super(recipeOutput, advancementOutput);
     }
 
     @Override
@@ -94,19 +93,7 @@ public class BG2Recipes extends RecipeProvider {
                 .save(output);
     }
 
-    public static class Runner extends RecipeProvider.Runner {
-        public Runner(PackOutput packOutput, CompletableFuture<HolderLookup.Provider> registries) {
-            super(packOutput, registries);
-        }
-
-        @Override
-        protected RecipeProvider createRecipeProvider(HolderLookup.Provider registries, RecipeOutput output) {
-            return new BG2Recipes(registries, output);
-        }
-
-        @Override
-        public String getName() {
-            return "BuildingGadgets2 Recipes";
-        }
+    public static MultiRegistryBootstrap bootstrap() {
+        return RecipeProvider.asBootstrap(BG2Recipes::new);
     }
 }

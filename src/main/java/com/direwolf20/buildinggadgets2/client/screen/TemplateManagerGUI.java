@@ -5,6 +5,7 @@
 
 package com.direwolf20.buildinggadgets2.client.screen;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.direwolf20.buildinggadgets2.BuildingGadgets2;
 import com.direwolf20.buildinggadgets2.client.renderer.GuiTemplatePreview;
 import com.direwolf20.buildinggadgets2.client.screen.widgets.ScrollingMaterialList;
@@ -275,7 +276,7 @@ public class TemplateManagerGUI extends AbstractContainerScreen<TemplateManagerC
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.key() == 256) {
+        if (event.key() == InputConstants.KEY_ESCAPE) {
             this.onClose();
             return true;
         }
@@ -399,7 +400,7 @@ public class TemplateManagerGUI extends AbstractContainerScreen<TemplateManagerC
             CompoundTag deserializedNBT = TagParser.parseCompoundFully(template.statePosArrayList);
             statePosArrayList = BG2Data.statePosListFromNBTMapArray(deserializedNBT);
         } catch (Exception e) {
-            getMinecraft().gui.setOverlayMessage(Component.translatable("buildinggadgets2.screen.invalidjson"), false);
+            getMinecraft().player.sendOverlayMessage(Component.translatable("buildinggadgets2.screen.invalidjson"));
             // Handle the exception if the string isn't a valid NBT
             return;
         }

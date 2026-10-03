@@ -52,13 +52,14 @@ public class Config {
         powerConfig();
         COMMON_BUILDER.pop();
 
-        container.registerConfig(ModConfig.Type.COMMON, COMMON_BUILDER.build());
+        // COMMON was renamed to LOCAL in 26.3; keep the old filename so existing configs still load
+        container.registerConfig(ModConfig.Type.LOCAL, COMMON_BUILDER.build(), "buildinggadgets2-common.toml");
     }
 
     private static void registerServerConfigs(ModContainer container) {
         //GeneratorConfig.registerServerConfig(SERVER_BUILDER);
         //PowergenConfig.registerServerConfig(SERVER_BUILDER);
-        container.registerConfig(ModConfig.Type.SERVER, SERVER_BUILDER.build());
+        container.registerConfig(ModConfig.Type.SYNCED, SERVER_BUILDER.build());
     }
 
     private static void generalConfig() {

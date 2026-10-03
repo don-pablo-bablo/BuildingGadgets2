@@ -20,7 +20,7 @@ import com.direwolf20.buildinggadgets2.util.modes.BaseMode;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.KeyMapping;
@@ -176,7 +176,7 @@ public class ModeRadialMenu extends Screen {
                 if (send) {
                     var mode = GadgetNBT.getMode(tool);
                     if (GadgetNBT.hasCopyUUID(tool) && mode.getId().getPath().equals("paste")) {
-                        getMinecraft().setScreen(new MaterialListGUI(tool));
+                        getMinecraft().gui.setScreen(new MaterialListGUI(tool));
                     }
                 }
 
@@ -205,9 +205,9 @@ public class ModeRadialMenu extends Screen {
 
                 getMinecraft().player.closeContainer();
                 if (mode.getId().getPath().equals("paste"))
-                    getMinecraft().setScreen(new PasteGUI(tool));
+                    getMinecraft().gui.setScreen(new PasteGUI(tool));
                 else
-                    getMinecraft().setScreen(new CopyGUI(tool));
+                    getMinecraft().gui.setScreen(new CopyGUI(tool));
                 return true;
             }));
 
@@ -484,7 +484,7 @@ public class ModeRadialMenu extends Screen {
 
     @Override
     public void tick() {
-        if (!InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), KeyBindings.menuSettings.getKey().getValue())) {
+        if (!InputConstants.isKeyDown(KeyBindings.menuSettings.getKey().getValue())) {
             onClose();
             changeMode();
         }

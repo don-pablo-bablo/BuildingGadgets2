@@ -13,7 +13,7 @@
     },
     "has_the_recipe": {
       "conditions": {
-        "recipe": "buildinggadgets2:template_manager"
+        "recipes": "buildinggadgets2:template_manager"
       },
       "trigger": "minecraft:recipe_unlocked"
     }

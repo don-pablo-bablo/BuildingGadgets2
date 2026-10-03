@@ -13,7 +13,7 @@
     },
     "has_the_recipe": {
       "conditions": {
-        "recipe": "buildinggadgets2:gadget_cut_paste"
+        "recipes": "buildinggadgets2:gadget_cut_paste"
       },
       "trigger": "minecraft:recipe_unlocked"
     }

@@ -3,7 +3,7 @@ plugins {
     id 'eclipse'
     id 'idea'
     id 'maven-publish'
-    id 'net.neoforged.gradle.userdev' version '7.1.21'
+    id 'net.neoforged.gradle.userdev' version '7.1.39'
 }
 
 version = "${mod_version}"
@@ -19,6 +19,7 @@ repositories {
         url 'https://maven.blamejared.com'
         content {
             includeGroup "mezz.jei"
+            includeGroup "net.mezzdev.config" // JEI 26.3+ runtime dependency
         }
     }
     //
@@ -30,9 +31,14 @@ repositories {
     //    }
     //}
     //
-    // Curios 15.x for NeoForge 26.1 isn't on the OctoStudios maven yet —
-    // pull from CurseForge via CurseMaven instead.
-    maven { url = "https://www.cursemaven.com" }
+    // Curios for NeoForge 26.3 isn't on the OctoStudios maven yet —
+    // pull it from the Modrinth maven instead.
+    maven {
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
+    }
 }
 
 base {
@@ -139,9 +145,11 @@ dependencies {
     //compileOnly "appeng:appliedenergistics2:${ae2_version}:api"
     //runtimeOnly "appeng:appliedenergistics2:${ae2_version}"
     //
-    // Curios — sourced from CurseForge (CurseMaven). project id 309927.
-    // Bump file id in gradle.properties (curios_file_id) when updating.
-    implementation "curse.maven:curios-309927:${curios_file_id}"
+    // Curios — sourced from the Modrinth maven.
+    // Bump curios_version in gradle.properties when updating.
+    // Compile-only for now: Curios 17.0.0-beta.2+26.3 still references ModConfig.Type.COMMON, which
+    // NeoForge 26.3 removed, so it crashes on load. Switch back to implementation once Curios is fixed.
+    compileOnly "maven.modrinth:curios:${curios_version}"
     //
     // JEI — API at compile time, full mod at runtime
     compileOnly "mezz.jei:jei-${jei_mc_version}-common-api:${jei_version}"

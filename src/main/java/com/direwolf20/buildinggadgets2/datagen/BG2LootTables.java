@@ -1,7 +1,7 @@
 package com.direwolf20.buildinggadgets2.datagen;
 
 import com.direwolf20.buildinggadgets2.setup.Registration;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.data.loot.LootTableSubProvider;
 import net.minecraft.data.loot.packs.VanillaBlockLoot;
 import net.minecraft.world.level.block.Block;
 import net.neoforged.neoforge.registries.DeferredHolder;
@@ -10,8 +10,8 @@ import java.util.stream.Collectors;
 
 public class BG2LootTables extends VanillaBlockLoot {
 
-    public BG2LootTables(HolderLookup.Provider p_344962_) {
-        super(p_344962_);
+    public BG2LootTables(LootTableSubProvider.Context context) {
+        super(context);
     }
 
     @Override
@@ -21,7 +21,7 @@ public class BG2LootTables extends VanillaBlockLoot {
     }
 
     @Override
-    protected Iterable<Block> getKnownBlocks() {
+    public Iterable<Block> getKnownBlocks() {
         return Registration.BLOCKS.getEntries().stream().map(DeferredHolder::get).collect(Collectors.toList());
     }
 }

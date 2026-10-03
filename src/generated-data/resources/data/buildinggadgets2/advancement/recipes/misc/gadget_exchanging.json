@@ -13,7 +13,7 @@
     },
     "has_the_recipe": {
       "conditions": {
-        "recipe": "buildinggadgets2:gadget_exchanging"
+        "recipes": "buildinggadgets2:gadget_exchanging"
       },
       "trigger": "minecraft:recipe_unlocked"
     }
